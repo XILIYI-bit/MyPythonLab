@@ -6,6 +6,10 @@ import os
 import winsound
 import time
 
+# --- 新增的绘图库 ---
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 # === 核心参数与映射表 ===
 DTMF_TABLE = {
     '1': (697, 1209), '2': (697, 1336), '3': (697, 1477),
@@ -52,8 +56,8 @@ def recognize_audio(filepath):
 class DTMFApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("拨号音分析系统 (Mobile Lab)")
-        self.root.geometry("700x650") # 稍微调宽调高
+        self.root.title("拨号音分析系统 (Mobile Lab + Oscilloscope)")
+        self.root.geometry("750x760") # 再次拉高，给波形图腾出空间
         self.root.configure(bg="#F4F5F7")
         
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -85,29 +89,24 @@ class DTMFApp:
     def setup_ui(self):
         left_frame = tk.Frame(self.root, width=350, bg="#F4F5F7")
         left_frame.pack(side="left", fill="y", padx=10, pady=10)
-        right_frame = tk.Frame(self.root, width=320, relief="flat", bg="white", highlightbackground="#E0E0E0", highlightthickness=1)
+        right_frame = tk.Frame(self.root, width=350, relief="flat", bg="white", highlightbackground="#E0E0E0", highlightthickness=1)
         right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
+        # ---------------- 左侧：拨号盘 ----------------
         tk.Label(left_frame, text="📞 手机仿真拨号盘", font=("微软雅黑", 14, "bold"), bg="#F4F5F7").pack(pady=5)
-
-        # 增加 Canvas 整体高度至 560
         self.canvas = tk.Canvas(left_frame, width=310, height=560, bg="#F4F5F7", highlightthickness=0)
         self.canvas.pack()
-        
-        # 模拟手机屏幕区
         self.canvas.create_rectangle(15, 10, 295, 70, fill="white", outline="#E0E0E0", width=1)
         self.display_text_id = self.canvas.create_text(155, 40, text="", font=("Consolas", 26, "bold"), fill="#1976D2")
         
-        # 按钮通用工厂
         def create_btn(x, y, r, t1, t2, val):
             tag = f"btn_{val}"
-            self.canvas.create_oval(x-r+1, y-r+2, x+r+1, y+r+2, fill="#D6D8DC", outline="", tags=tag) # 阴影
-            c = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="white", outline="#E8EAF6", tags=tag) # 本体
+            self.canvas.create_oval(x-r+1, y-r+2, x+r+1, y+r+2, fill="#D6D8DC", outline="", tags=tag)
+            c = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="white", outline="#E8EAF6", tags=tag)
             self.canvas.create_text(x, y-8, text=t1, font=("微软雅黑", 22, "bold"), tags=tag)
             self.canvas.create_text(x, y+14, text=t2, font=("微软雅黑", 8, "bold"), fill="gray", tags=tag)
             self.canvas.tag_bind(tag, "<Button-1>", lambda e, v=val: self.press_key(v))
 
-        # 数字键布局
         keys = [('1','','1'),('2','ABC','2'),('3','DEF','3'),
                 ('4','GHI','4'),('5','JKL','5'),('6','MNO','6'),
                 ('7','PQRS','7'),('8','TUV','8'),('9','WXYZ','9'),
@@ -117,8 +116,7 @@ class DTMFApp:
             row, col = i // 3, i % 3
             create_btn(65 + col*90, 125 + row*85, 36, t1, t2, v)
 
-        # --- 底部功能区重排 ---
-        # 1. 绿色 CALL 按钮 (居中)
+        # 左侧底部操作区
         call_x, call_y, call_r = 155, 485, 40
         tag_call = "call_btn"
         self.canvas.create_oval(call_x-call_r+1, call_y-call_r+2, call_x+call_r+1, call_y+call_r+2, fill="#a0c0a0", outline="", tags=tag_call)
@@ -126,32 +124,65 @@ class DTMFApp:
         self.canvas.create_text(call_x, call_y, text="CALL", fill="white", font=("微软雅黑", 12, "bold"), tags=tag_call)
         self.canvas.tag_bind(tag_call, "<Button-1>", lambda e: self.build_audio())
 
-        # 2. 清空文本按钮 (左侧)
         clear_btn = self.canvas.create_text(65, 485, text="清空", font=("微软雅黑", 11, "bold"), fill="#757575")
         self.canvas.tag_bind(clear_btn, "<Button-1>", lambda e: self.seq_var.set(""))
-
-        # 3. 退格按钮 (右侧 ⌫)
         back_btn = self.canvas.create_text(245, 485, text="⌫", font=("微软雅黑", 18), fill="#757575")
         self.canvas.tag_bind(back_btn, "<Button-1>", lambda e: self.delete_key())
 
-        # 右侧分析面板保持逻辑
+        # ---------------- 右侧：分析面板 ----------------
         header = tk.Frame(right_frame, bg="#3F51B5", pady=10)
         header.pack(fill="x")
         tk.Label(header, text="🔬 信号解析终端", font=("微软雅黑", 12, "bold"), bg="#3F51B5", fg="white").pack()
-        tk.Label(right_frame, text="待检测文件:", bg="white", font=("微软雅黑", 9, "bold")).pack(anchor="w", padx=15, pady=15)
-        tk.Label(right_frame, textvariable=self.file_var, fg="#616161", wraplength=260, bg="#F5F5F5", justify="left").pack(fill="x", padx=15, ipady=5)
+        
+        tk.Label(right_frame, text="待检测文件:", bg="white", font=("微软雅黑", 9, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
+        tk.Label(right_frame, textvariable=self.file_var, fg="#616161", wraplength=300, bg="#F5F5F5", justify="left").pack(fill="x", padx=15, ipady=3)
         
         btn_box = tk.Frame(right_frame, bg="white")
-        btn_box.pack(fill="x", padx=15, pady=15)
+        btn_box.pack(fill="x", padx=15, pady=10)
         tk.Button(btn_box, text="📂 载入音频", command=self.load_file, relief="groove").pack(side="left", expand=True, fill="x", padx=2)
         tk.Button(btn_box, text="▶️ 试听", command=self.play_audio, relief="groove").pack(side="right", expand=True, fill="x", padx=2)
         
-        tk.Button(right_frame, text="🚀 启动算法识别号码", font=("微软雅黑", 12, "bold"), bg="#FF9800", fg="white", relief="flat", command=self.run_recognition).pack(fill="x", padx=20, pady=30, ipady=8)
-        tk.Label(right_frame, text="最终识别号码", bg="white").pack()
-        tk.Label(right_frame, textvariable=self.result_var, font=("Consolas", 32, "bold"), fg="#D32F2F", bg="#FFEBEE").pack(pady=10, fill="x", padx=15, ipady=15)
+        tk.Button(right_frame, text="🚀 启动算法识别号码", font=("微软雅黑", 12, "bold"), bg="#FF9800", fg="white", relief="flat", command=self.run_recognition).pack(fill="x", padx=20, pady=(15, 5), ipady=6)
+        
+        tk.Label(right_frame, textvariable=self.result_var, font=("Consolas", 32, "bold"), fg="#D32F2F", bg="#FFEBEE").pack(pady=5, fill="x", padx=15, ipady=10)
+
+        # === 新增：实时示波器区域 ===
+        tk.Label(right_frame, text="📈 实时时域波形 (Oscilloscope)", bg="white", font=("微软雅黑", 10, "bold")).pack(pady=(10, 0))
+        
+        # 初始化 Matplotlib 画布
+        self.fig, self.ax = plt.subplots(figsize=(4, 1.8), dpi=80)
+        self.fig.patch.set_facecolor('#F5F5F5')
+        self.ax.set_facecolor('#000000') # 示波器黑底
+        self.ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False) # 隐藏坐标轴刻度
+        
+        self.canvas_plot = FigureCanvasTkAgg(self.fig, master=right_frame)
+        self.canvas_plot.get_tk_widget().pack(fill="both", expand=True, padx=15, pady=(5, 15))
+        
+        # 画一条初始的平直线
+        self.line, = self.ax.plot(np.zeros(200), color="#00FF00", linewidth=1.5)
+        self.ax.set_ylim(-1.2, 1.2)
+        self.fig.tight_layout(pad=0.5)
+
+    # --- 业务逻辑 ---
+    def update_plot(self, signal):
+        """核心：更新波形图"""
+        # 老大注意：我们只截取前 200 个采样点 (约 25ms)，这样才能看清波形的起伏细节。
+        # 如果把整个波形画上去，会密密麻麻变成一个色块。
+        view_window = signal[:200] 
+        self.line.set_ydata(view_window)
+        self.canvas_plot.draw_idle() # 高效刷新画布
 
     def press_key(self, key):
         self.seq_var.set(self.seq_var.get() + key)
+        f_l, f_h = DTMF_TABLE[key]
+        
+        # 实时生成时域信号
+        t = np.linspace(0, 0.15, int(FS * 0.15), endpoint=False)
+        sig = 0.5 * np.sin(2 * np.pi * f_l * t) + 0.5 * np.sin(2 * np.pi * f_h * t)
+        
+        # ⚡ 触发示波器刷新 ⚡
+        self.update_plot(sig)
+
         safe_key = {'*': 'star', '#': 'hash'}.get(key, key)
         path = os.path.join(self.audio_cache_dir, f"{safe_key}.wav")
         if os.path.exists(path): winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
@@ -159,6 +190,8 @@ class DTMFApp:
     def delete_key(self):
         s = self.seq_var.get()
         if s: self.seq_var.set(s[:-1])
+        # 删除时让示波器归零
+        self.update_plot(np.zeros(200))
 
     def build_audio(self):
         seq = self.seq_var.get()
