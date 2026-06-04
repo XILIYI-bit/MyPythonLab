@@ -1,0 +1,5 @@
+file,expected_digits,format
+sample_wav_123456.wav,123456,wav
+sample_aiff_7890.aiff,7890,aiff
+sample_au_159hash.au,159#,au
+sample_mp3_2580hash.mp3,2580#,mp3
